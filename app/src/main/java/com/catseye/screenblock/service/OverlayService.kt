@@ -244,6 +244,7 @@ class OverlayService : LifecycleService(),
 
         stopForeground(STOP_FOREGROUND_REMOVE)
 //        stopSelf() <- only if stop from inside
+        // s
     }
 
 
