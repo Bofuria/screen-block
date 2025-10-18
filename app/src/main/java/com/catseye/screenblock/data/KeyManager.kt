@@ -1,14 +1,21 @@
 package com.catseye.screenblock.data
 
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.LifecycleOwner
+import com.catseye.screenblock.dataStore
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.launch
@@ -25,42 +32,50 @@ sealed interface KeyResult {
     data class Error(val msg: String): KeyResult
 }
 
+data class KeyData(
+    val key: ByteArray,
+    val salt: ByteArray
+)
+
 class KeyManager @Inject constructor(
-    private val dataStoreManager: DataStoreManager
+    private val dataStoreManager: DataStoreManager,
+    @ApplicationContext private val context: Context
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private var salt: ByteArray? = null
-    private var hashedKey: ByteArray? = null
+    private lateinit var keyData: Flow<KeyData?>
 
     init {
         scope.launch {
-            val saltFlow = dataStoreManager.getStoredSalt()
-            val keyFlow = dataStoreManager.getStoredKey()
-
-            saltFlow.combine(keyFlow) { cSalt, cKey ->
-                Pair(cSalt, cKey)
-            }.collect { pair ->
-                salt = pair.first
-                hashedKey = pair.second
-            }
+            keyData = dataStoreManager.getKeyPair().map { pair ->
+                pair?.let {
+                    Log.d("MyLog", "KeyData: $pair")
+                    KeyData(pair.first, pair.second)
+                }
+            }.distinctUntilChanged()
         }
     }
 
-    suspend fun isKeyPresent(): Boolean {
-        return salt != null && hashedKey != null
+    fun isKeyPresent(): Flow<Boolean> {
+        return dataStoreManager.getKeyPair().map {
+            it != null
+        }.distinctUntilChanged()
     }
 
+
     suspend fun compareKey(newKey: List<Int>): Boolean {
-        val hashedNewKey = getHashedKey(salt!!, newKey)
-        return MessageDigest.isEqual(hashedNewKey, hashedKey)
+        val kData = keyData.first() ?: return false
+        val hashedNewKey = getHashedKey(kData!!.salt, newKey)
+        Log.d("Keys", "stored: ${kData!!.key}, entered: $hashedNewKey")
+        return MessageDigest.isEqual(hashedNewKey, kData!!.key)
+
     }
 
     suspend fun createNewKey(pattern: List<Int>): KeyResult {
         try {
             val newSalt = createSalt()
             val newHashedKey = getHashedKey(newSalt, pattern)
-            dataStoreManager.storePair(newHashedKey, newSalt)
+            dataStoreManager.storePair(newSalt, newHashedKey)
             return KeyResult.Success
         } catch (e: Exception) {
             Log.e("KeyError", "Error creating key: $e")
@@ -75,8 +90,10 @@ class KeyManager @Inject constructor(
     }
 
     private suspend fun getHashedKey(salt: ByteArray, pattern: List<Int>, iters: Int = 150000): ByteArray /* hashedKey */ {
+        Log.d("MyKey", "salt: ${salt.hex()}, pattern: ${pattern}")
+
         val keyCharArray = pattern.joinToString(",").toCharArray()
-        Log.d("MyKey", "getHashedKey: ${keyCharArray[0]}")
+        Log.d("MyKey", "getHashedKey: ${pattern}")
         val specKey = PBEKeySpec(
             keyCharArray,
             salt,
@@ -84,7 +101,9 @@ class KeyManager @Inject constructor(
             PBE_KEY_LENGTH
         )
 
-        return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(specKey).encoded
+        val result = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(specKey).encoded
+        Log.d("MyKey", "result: ${result.hex()}")
+        return result
     }
 
     // onDestroy vm
@@ -92,3 +111,5 @@ class KeyManager @Inject constructor(
         scope.cancel()
     }
 }
+
+fun ByteArray.hex(): String = joinToString("") { "%02x".format(it) }

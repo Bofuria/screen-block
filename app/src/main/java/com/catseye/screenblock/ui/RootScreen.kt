@@ -29,7 +29,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme.colorScheme
 import androidx.compose.material3.MaterialTheme.typography
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -59,11 +58,13 @@ import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.mrhwsn.composelock.ComposeLock
 import com.mrhwsn.composelock.ComposeLockCallback
 import com.mrhwsn.composelock.Dot
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun RootScreen(
-    rootViewModel: RootViewModel
+    rootViewModel: RootViewModel,
+//    backStackEntry: NavBackStackEntry
 ) {
     val context = LocalContext.current
 
@@ -134,7 +135,7 @@ fun RootScreen(
         )
         SwitchBlock(
             isPermissionEnabled = isGranted,
-            isBubbleEnabled = state.isOverlayActive,
+            isBubbleEnabled = state.isOverlayActive && state.isKeyEstablished,
             onRunService = {
                 rootViewModel.onEvent(RootScreenEvent.ToggleFloatingBubble(it))
             }
@@ -359,46 +360,115 @@ fun SetKeyDialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(
-            modifier = Modifier
-                .fillMaxSize(),
-        ) {
-            ComposeLock(
-                modifier = Modifier
-                    .size(400.dp)
-                    .fillMaxWidth(),
-                dimension = 3,
-                sensitivity = 100f,
-                dotsColor = Color.Black,
-                dotsSize = 20f,
-                linesColor = Color.Black,
-                linesStroke = 30f,
-                animationDuration = 200,
-                animationDelay = 100,
-                callback = object : ComposeLockCallback {
-                    override fun onStart(dot: Dot) {
-//                Toast.makeText(context, "start on dot with id : ${dot.id}", Toast.LENGTH_SHORT).show()
-                        Log.d("KeyLog", "start")
-                    }
-
-                    override fun onDotConnected(dot: Dot) {
-//                Toast.makeText(context, "dot connected with id : ${dot.id}", Toast.LENGTH_SHORT).show()
-                        Log.d("KeyLog", "connect")
-
-                    }
-
-                    override fun onResult(result: List<Dot>) {
-                        val res = result.map { it.id }
-//                        Log.d("KeyLog", "result: $res")
-                        onKeyEntered(res)
-
-                        onDismiss()
-//                var connectedDots = ""
-//                for (dot in result) connectedDots += "${dot.id }  "
-//                Toast.makeText(context, "result : $connectedDots", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
-        }
+        ComposeLock(
+            onKeyEntered = onKeyEntered,
+            onDismiss = onDismiss
+        )
     }
 }
+
+@Composable
+fun ComposeLock(
+    modifier: Modifier = Modifier,
+    onKeyEntered: (List<Int>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(0.3f)),
+        contentAlignment = Alignment.Center
+    ) {
+
+        ComposeLock(
+            modifier = Modifier
+                .size(300.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(0.5f)),
+            dimension = 3,
+            sensitivity = 100f,
+            dotsColor = Color.White,
+            dotsSize = 20f,
+            linesColor = Color.White,
+            linesStroke = 30f,
+            animationDuration = 200,
+            animationDelay = 100,
+            callback = object : ComposeLockCallback {
+                override fun onStart(dot: Dot) {
+                    Log.d("KeyLog", "start")
+                }
+
+                override fun onDotConnected(dot: Dot) {
+                    Log.d("KeyLog", "connect")
+                }
+
+                override fun onResult(result: List<Dot>) {
+                    val res = result.map { it.id }
+                    onKeyEntered(res)
+                    onDismiss()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun TimeoutComposeLock(
+    modifier: Modifier = Modifier,
+    onKeyEntered: (List<Int>) -> Unit,
+    onDismiss: () -> Unit,
+    isPatternVisible: Boolean
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.Black.copy(0.3f)),
+        contentAlignment = Alignment.Center
+    ) {
+
+        var actionTimeout by remember { mutableStateOf<Dot?>(null) }
+
+        if(isPatternVisible) {
+            LaunchedEffect(true) {
+//                Log.d("actionTimeout", "actionTimeout: $actionTimeout")
+                if(actionTimeout == null) {
+                    delay(5000)
+                    onDismiss()
+                }
+            }
+        }
+
+        ComposeLock(
+            modifier = Modifier
+                .size(300.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.Black.copy(0.5f)),
+            dimension = 3,
+            sensitivity = 100f,
+            dotsColor = Color.White,
+            dotsSize = 20f,
+            linesColor = Color.White,
+            linesStroke = 30f,
+            animationDuration = 200,
+            animationDelay = 100,
+            callback = object : ComposeLockCallback {
+                override fun onStart(dot: Dot) {
+                    Log.d("KeyLog", "start")
+                    actionTimeout = dot
+                }
+
+                override fun onDotConnected(dot: Dot) {
+                    Log.d("KeyLog", "connect")
+                    actionTimeout = dot
+                }
+
+                override fun onResult(result: List<Dot>) {
+                    val res = result.map { it.id }
+                    onKeyEntered(res)
+                    onDismiss()
+                }
+            }
+        )
+    }
+}
+

@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.PixelFormat
 import android.net.Uri
 import android.os.Build
@@ -13,44 +12,31 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.pointerInteropFilter
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.setViewTreeLifecycleOwner
-import androidx.navigation.NavDeepLinkBuilder
-import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
@@ -62,13 +48,29 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.roundToInt
 import androidx.compose.material3.MaterialTheme.colorScheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.alpha
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import com.catseye.screenblock.data.KeyManager
+import com.catseye.screenblock.ui.TimeoutComposeLock
+import dagger.hilt.android.AndroidEntryPoint
+import jakarta.inject.Inject
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 
 private const val APP_UPDATE_PENDING_INTENT_REQUEST_CODE = 1001
 
-class OverlayService : LifecycleService(),
+@AndroidEntryPoint
+class OverlayService() : LifecycleService(),
     SavedStateRegistryOwner
 {
+
+    @Inject
+    lateinit var keyManager: KeyManager
 
     private val ssrController = SavedStateRegistryController.create(this)
     override val savedStateRegistry get() = ssrController.savedStateRegistry
@@ -78,11 +80,16 @@ class OverlayService : LifecycleService(),
     private val _isOverlayActive = MutableStateFlow(false)
     val isOverlayActive = _isOverlayActive.asStateFlow()
 
+    private var _isPatternVisible = MutableStateFlow(false)
+    val isPatternVisible = _isPatternVisible.asStateFlow()
+
     private var overlayView: ComposeView? = null
     private var overlayBubbleView: ComposeView? = null
+    private var overlayLockView: ComposeView? = null
 
     private lateinit var bubbleLp: WindowManager.LayoutParams
-    private lateinit var overlayLP: WindowManager.LayoutParams
+    private lateinit var overlayLp: WindowManager.LayoutParams
+    private lateinit var lockLp: WindowManager.LayoutParams
 
     override fun onCreate() {
         super.onCreate()
@@ -93,7 +100,7 @@ class OverlayService : LifecycleService(),
         createNotificationChannel()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        overlayLP = WindowManager.LayoutParams(
+        overlayLp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -104,7 +111,7 @@ class OverlayService : LifecycleService(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
-        overlayLP.gravity = Gravity.TOP
+        overlayLp.gravity = Gravity.TOP
         overlayView = getOverlayView()
         overlayView?.visibility = View.GONE // hide initially
 
@@ -119,6 +126,18 @@ class OverlayService : LifecycleService(),
             gravity = Gravity.TOP or Gravity.START
 //            x = bubbleStartX; y = bubbleStartY
         }
+
+        lockLp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+                if(Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
+        }
+
         overlayBubbleView = getBubbleView(
             onDrag = { dx, dy ->
                 bubbleLp.x = dx
@@ -126,13 +145,34 @@ class OverlayService : LifecycleService(),
                 windowManager.updateViewLayout(overlayBubbleView, bubbleLp)
             },
             onClick = {
-                if (isOverlayActive.value) disableBlock() else enableBlock()
-                _isOverlayActive.value = !_isOverlayActive.value
+                _isPatternVisible.value = true
+                overlayLockView?.visibility = View.VISIBLE
+//
             }
         )
 
-        windowManager.addView(overlayView, overlayLP)
+        overlayLockView = getLockView(
+            onKeyEntered = { list ->
+                lifecycleScope.launch {
+                    val keyMatched = keyManager.compareKey(list)
+                    Log.d("KeyMatch", "keyMatched: $keyMatched")
+                    disableBlock(keyMatched)
+                    _isPatternVisible.value = false
+                    overlayLockView?.visibility = View.GONE
+                }
+            },
+            onDismiss = {
+                _isPatternVisible.value = false
+                overlayLockView?.visibility = View.GONE
+//                windowManager.removeView(overlayLockView)
+            }
+        )
+
+        overlayLockView?.visibility = View.GONE
+
+        windowManager.addView(overlayView, overlayLp)
         windowManager.addView(overlayBubbleView, bubbleLp)
+        windowManager.addView(overlayLockView, lockLp)
 
         val intent = Intent(
             Intent.ACTION_VIEW,
@@ -155,14 +195,20 @@ class OverlayService : LifecycleService(),
 
     private fun enableBlock() {
         overlayView?.visibility = View.VISIBLE
-        overlayLP.flags = overlayLP.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-        windowManager.updateViewLayout(overlayView, overlayLP)
+        overlayLp.flags = overlayLp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        windowManager.updateViewLayout(overlayView, overlayLp)
+        _isOverlayActive.value = true
     }
 
-    private fun disableBlock() {
-        overlayView?.visibility = View.GONE
-        overlayLP.flags = overlayLP.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        windowManager.updateViewLayout(overlayView, overlayLP)
+    private fun disableBlock(isKeyMatched: Boolean) {
+        if(isKeyMatched) {
+            _isOverlayActive.value = false
+            overlayView?.visibility = View.GONE
+            overlayLp.flags = overlayLp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            windowManager.updateViewLayout(overlayView, overlayLp)
+        } else {
+            _isPatternVisible.value = false
+        }
     }
 
     fun getOverlayView(): ComposeView? {
@@ -173,6 +219,13 @@ class OverlayService : LifecycleService(),
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
             setContent {
+
+//                val lifecycle = LocalLifecycleOwner.current.lifecycle
+//
+//                ResumeListener(lifecycle) {
+//                    disableBlock(true)
+//                }
+
                 // todo: pass the callback for screen block component
                 // displays the bubble and the block overlay. Clicking the bubble only shows/hides the
                 // block overlay, to turn off the service user either clicks notification or
@@ -193,21 +246,47 @@ class OverlayService : LifecycleService(),
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
             setContent {
+                val lockState by isOverlayActive.collectAsStateWithLifecycle()
 
-                val lockState by _isOverlayActive.collectAsState()
+                var offsetX by rememberSaveable { mutableIntStateOf(0) }
+                var offsetY by rememberSaveable { mutableIntStateOf(0) }
 
-                var offsetX by remember { mutableIntStateOf(0) }
-                var offsetY by remember { mutableIntStateOf(0) }
+                var isRecentlyClicked by rememberSaveable { mutableStateOf(false) }
+                var isIconTransparent by rememberSaveable { mutableStateOf(true) }
+
+                LaunchedEffect(lockState) {
+                    if(lockState) {
+                        isIconTransparent = false
+                        delay(3000)
+                        isIconTransparent = true
+                    } else {
+
+                    }
+                }
+
+                LaunchedEffect(isRecentlyClicked) {
+                    Log.d("Click", "isRecentlyClicked: $isRecentlyClicked")
+                    if(isRecentlyClicked) {
+                        isIconTransparent = false
+//                        isRecentlyClicked = true
+                        delay(3000)
+                        isRecentlyClicked = false
+                        isIconTransparent = true
+
+                    }
+                }
 
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(100))
-                        .background(if(lockState) colorScheme.errorContainer else colorScheme.surface)
+                        .alpha(if(isIconTransparent) 0.5f else 1f)
+                        .background(if(!lockState) colorScheme.errorContainer else colorScheme.surface)
                 ) {
                     Icon(
                         modifier = Modifier
                             .padding(8.dp)
                             .size(40.dp)
+                            .alpha(if(isIconTransparent) 0.5f else 1f)
                             .pointerInput(Unit) {
                                 detectDragGestures { change, drag ->
                                     offsetX += drag.x.roundToInt()
@@ -219,13 +298,44 @@ class OverlayService : LifecycleService(),
                             .clickable(
                                 indication = null,
                                 interactionSource = remember { MutableInteractionSource() },
-                                onClick = onClick
+                                onClick = {
+                                    if(!lockState) {
+                                        enableBlock()
+                                    } else if(isRecentlyClicked) {
+                                        Log.d("OverlayCall", "onClick for key pattern")
+                                        onClick()
+                                    }
+                                    isRecentlyClicked = true
+                                }
                             ),
                         painter = painterResource(if(lockState) R.drawable.lock_icon else R.drawable.lock_open_icon),
                         contentDescription = "",
                         tint = if(lockState) colorScheme.error else colorScheme.onSurface
                     )
                 }
+            }
+        }
+    }
+
+    fun getLockView(
+        onKeyEntered: (List<Int>) -> Unit,
+        onDismiss: () -> Unit
+    ): ComposeView? {
+        return ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@OverlayService)
+            setViewTreeSavedStateRegistryOwner(this@OverlayService)
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+
+            setContent {
+
+                val patternVisible by isPatternVisible.collectAsStateWithLifecycle()
+
+                TimeoutComposeLock(
+                    modifier = Modifier,
+                    onKeyEntered = onKeyEntered,
+                    onDismiss = onDismiss,
+                    isPatternVisible = patternVisible
+                )
             }
         }
     }
@@ -238,15 +348,15 @@ class OverlayService : LifecycleService(),
         super.onDestroy()
         overlayBubbleView?.let { runCatching { windowManager.removeViewImmediate(it) } }
         overlayView?.let { runCatching { windowManager.removeViewImmediate(it) } }
+        overlayLockView?.let { runCatching { windowManager.removeViewImmediate(it) } }
+        overlayLockView = null
         overlayView = null
         overlayBubbleView = null
-
 
         stopForeground(STOP_FOREGROUND_REMOVE)
 //        stopSelf() <- only if stop from inside
         // s
     }
-
 
     private fun buildNotification(pendingIntent: PendingIntent): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -284,6 +394,7 @@ class OverlayService : LifecycleService(),
             .putString("ssr", Base64.encodeToString(bytes, Base64.DEFAULT))
             .apply()
     }
+
     private fun loadSavedState(): Bundle? {
         val s = getSharedPreferences("overlay_state", MODE_PRIVATE)
             .getString("ssr", null) ?: return null
@@ -301,4 +412,7 @@ class OverlayService : LifecycleService(),
         private const val CHANNEL_ID = "overlay_fgs"
     }
 }
+
+
+
 

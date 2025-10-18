@@ -1,6 +1,7 @@
 package com.catseye.screenblock.data
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.byteArrayPreferencesKey
 import androidx.datastore.preferences.core.edit
 import com.catseye.screenblock.dataStore
@@ -19,20 +20,31 @@ class DataStoreManager @Inject constructor (
     private val saltPrefKey = byteArrayPreferencesKey(KEY_SALT)
     private val hashedKeyPrefKey = byteArrayPreferencesKey(KEY_PASSWORD_HASH)
 
-    fun getStoredKey(): Flow<ByteArray?> {
-        return context.dataStore.data.map { preferences ->
-            preferences[hashedKeyPrefKey] ?: null
-        }
-    }
+//    fun getStoredKey(): Flow<ByteArray?> {
+//        return context.dataStore.data.map { preferences ->
+////            Log.d("DataStore", "Restored value: ${preferences[hashedKeyPrefKey]}")
+//            preferences[hashedKeyPrefKey] ?: null
+//        }
+//    }
+//
+//    fun getStoredSalt(): Flow<ByteArray?> {
+//        return context.dataStore.data.map { preferences ->
+////            Log.d("DataStore", "Restored value: ${preferences[saltPrefKey]}")
+//            preferences[saltPrefKey] ?: null
+//        }
+//    }
 
-    fun getStoredSalt(): Flow<ByteArray?> {
-        return context.dataStore.data.map { preferences ->
-                preferences[saltPrefKey] ?: null
+    fun getKeyPair(): Flow<Pair<ByteArray /* key */, ByteArray /* salt */>?> {
+        return context.dataStore.data.map { prefs ->
+            val salt = prefs[saltPrefKey]
+            val key = prefs[hashedKeyPrefKey]
+            if(salt != null && key != null) Pair(key, salt) else null
         }
     }
 
     suspend fun storePair(salt: ByteArray, key: ByteArray) {
         context.dataStore.edit { settings ->
+            Log.d("DataStore", "Storing values: salt: $salt, key: $key")
             settings[hashedKeyPrefKey] = key
             settings[saltPrefKey] = salt
         }

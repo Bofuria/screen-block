@@ -2,6 +2,7 @@ package com.catseye.screenblock.viewmodel
 
 import android.content.Context
 import android.content.Intent
+import android.location.Geocoder.isPresent
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
@@ -14,7 +15,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,10 +45,15 @@ class RootViewModel @Inject constructor(
 
     val serviceIntent = Intent(context, OverlayService::class.java)
 
+    val isKeyPresent: StateFlow<Boolean> = keyManager
+        .isKeyPresent()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     init {
         viewModelScope.launch {
-            val isKeyPresent = keyManager.isKeyPresent()
-            _state.update { it.copy(isKeyEstablished = isKeyPresent) }
+            isKeyPresent.collect { isPresent ->
+                _state.update { it.copy(isKeyEstablished = isPresent) }
+            }
         }
     }
 
@@ -87,6 +96,11 @@ class RootViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        keyManager.close()
     }
 
 }
