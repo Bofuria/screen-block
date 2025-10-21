@@ -20,20 +20,6 @@ class DataStoreManager @Inject constructor (
     private val saltPrefKey = byteArrayPreferencesKey(KEY_SALT)
     private val hashedKeyPrefKey = byteArrayPreferencesKey(KEY_PASSWORD_HASH)
 
-//    fun getStoredKey(): Flow<ByteArray?> {
-//        return context.dataStore.data.map { preferences ->
-////            Log.d("DataStore", "Restored value: ${preferences[hashedKeyPrefKey]}")
-//            preferences[hashedKeyPrefKey] ?: null
-//        }
-//    }
-//
-//    fun getStoredSalt(): Flow<ByteArray?> {
-//        return context.dataStore.data.map { preferences ->
-////            Log.d("DataStore", "Restored value: ${preferences[saltPrefKey]}")
-//            preferences[saltPrefKey] ?: null
-//        }
-//    }
-
     fun getKeyPair(): Flow<Pair<ByteArray /* key */, ByteArray /* salt */>?> {
         return context.dataStore.data.map { prefs ->
             val salt = prefs[saltPrefKey]

@@ -100,43 +100,11 @@ class OverlayService() : LifecycleService(),
         createNotificationChannel()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        overlayLp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-            PixelFormat.TRANSLUCENT
-        )
-        overlayLp.gravity = Gravity.TOP
+        overlayLp = overlayLP()
+        bubbleLp = overlayBubbleLP()
+        lockLp = overlayLockLP()
+
         overlayView = getOverlayView()
-        overlayView?.visibility = View.GONE // hide initially
-
-        bubbleLp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.TOP or Gravity.START
-//            x = bubbleStartX; y = bubbleStartY
-        }
-
-        lockLp = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
-                if(Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.CENTER
-        }
 
         overlayBubbleView = getBubbleView(
             onDrag = { dx, dy ->
@@ -147,7 +115,6 @@ class OverlayService() : LifecycleService(),
             onClick = {
                 _isPatternVisible.value = true
                 overlayLockView?.visibility = View.VISIBLE
-//
             }
         )
 
@@ -164,16 +131,21 @@ class OverlayService() : LifecycleService(),
             onDismiss = {
                 _isPatternVisible.value = false
                 overlayLockView?.visibility = View.GONE
-//                windowManager.removeView(overlayLockView)
             }
         )
-
-        overlayLockView?.visibility = View.GONE
 
         windowManager.addView(overlayView, overlayLp)
         windowManager.addView(overlayBubbleView, bubbleLp)
         windowManager.addView(overlayLockView, lockLp)
 
+        val pendingIntent = getNotificationIntent()
+
+        startForeground(NOTIF_ID,
+            buildNotification(pendingIntent),
+        )
+    }
+
+    private fun getNotificationIntent(): PendingIntent {
         val intent = Intent(
             Intent.ACTION_VIEW,
             Uri.parse(ROOT_URI),
@@ -181,15 +153,11 @@ class OverlayService() : LifecycleService(),
             MainActivity::class.java
         )
         intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        val pendingIntent: PendingIntent = PendingIntent.getActivity(
+        return PendingIntent.getActivity(
             this,
             APP_UPDATE_PENDING_INTENT_REQUEST_CODE,
             intent,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { PendingIntent.FLAG_IMMUTABLE } else { PendingIntent.FLAG_UPDATE_CURRENT }
-        )
-
-        startForeground(NOTIF_ID,
-            buildNotification(pendingIntent),
         )
     }
 
@@ -219,19 +187,9 @@ class OverlayService() : LifecycleService(),
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
             setContent {
-
-//                val lifecycle = LocalLifecycleOwner.current.lifecycle
-//
-//                ResumeListener(lifecycle) {
-//                    disableBlock(true)
-//                }
-
-                // todo: pass the callback for screen block component
-                // displays the bubble and the block overlay. Clicking the bubble only shows/hides the
-                // block overlay, to turn off the service user either clicks notification or
-                // manually navigates back while the block is off
                 OverlayScreen()
             }
+            visibility = View.GONE
         }
     }
 
@@ -268,7 +226,6 @@ class OverlayService() : LifecycleService(),
                     Log.d("Click", "isRecentlyClicked: $isRecentlyClicked")
                     if(isRecentlyClicked) {
                         isIconTransparent = false
-//                        isRecentlyClicked = true
                         delay(3000)
                         isRecentlyClicked = false
                         isIconTransparent = true
@@ -327,9 +284,7 @@ class OverlayService() : LifecycleService(),
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
             setContent {
-
                 val patternVisible by isPatternVisible.collectAsStateWithLifecycle()
-
                 TimeoutComposeLock(
                     modifier = Modifier,
                     onKeyEntered = onKeyEntered,
@@ -337,6 +292,7 @@ class OverlayService() : LifecycleService(),
                     isPatternVisible = patternVisible
                 )
             }
+            visibility = View.GONE
         }
     }
 
@@ -355,7 +311,6 @@ class OverlayService() : LifecycleService(),
 
         stopForeground(STOP_FOREGROUND_REMOVE)
 //        stopSelf() <- only if stop from inside
-        // s
     }
 
     private fun buildNotification(pendingIntent: PendingIntent): Notification {
@@ -383,7 +338,6 @@ class OverlayService() : LifecycleService(),
         }
     }
 
-    // --- simple persistence for the saved-state bundle ---
     private fun saveSavedState(b: Bundle) {
         val p = android.os.Parcel.obtain()
         p.writeBundle(b)
@@ -410,6 +364,50 @@ class OverlayService() : LifecycleService(),
     companion object {
         private const val NOTIF_ID = 1001
         private const val CHANNEL_ID = "overlay_fgs"
+
+        private fun overlayLP(): WindowManager.LayoutParams {
+            return WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else
+                    WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP
+            }
+        }
+
+        private fun overlayBubbleLP(): WindowManager.LayoutParams {
+            return WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+            }
+        }
+
+        private fun overlayLockLP(): WindowManager.LayoutParams {
+            return WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                if(Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else WindowManager.LayoutParams.TYPE_PHONE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.CENTER
+            }
+        }
+
+
     }
 }
 

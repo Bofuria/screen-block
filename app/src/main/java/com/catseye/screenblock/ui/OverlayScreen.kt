@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 
 @Composable
 fun OverlayScreen() {
-    // screen with bubble which enables the overlay block.
     Box(
         modifier = Modifier
             .fillMaxSize()

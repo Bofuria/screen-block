@@ -102,5 +102,4 @@ class RootViewModel @Inject constructor(
         super.onCleared()
         keyManager.close()
     }
-
 }

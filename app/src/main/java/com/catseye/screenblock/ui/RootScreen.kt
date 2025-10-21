@@ -63,15 +63,13 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun RootScreen(
-    rootViewModel: RootViewModel,
-//    backStackEntry: NavBackStackEntry
+    rootViewModel: RootViewModel
 ) {
     val context = LocalContext.current
 
     var isGranted by remember { mutableStateOf(Settings.canDrawOverlays(context)) }
     val state by rootViewModel.state.collectAsStateWithLifecycle()
 
-//    resultLauncher.launch(Manifest.permission.SYSTEM_ALERT_WINDOW)
     val runtimePermissions = rememberMultiplePermissionsState(
         permissions = listOf(
             POST_NOTIFICATIONS
@@ -88,7 +86,6 @@ fun RootScreen(
     val settingsIntent = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
-        // Many OEMs don’t return a result; re-check explicitly.
         isGranted = Settings.canDrawOverlays(context)
         if (isGranted) {
             Log.d("PermissionCheck", "Permission granted")
@@ -245,12 +242,10 @@ fun ButtonWithText(
             Text(
                 text = buttonText,
                 style = typography.bodyMedium
-            ) // change text based on permission status
+            )
         }
     }
 }
-
-// switched on for when bubble is up
 
 @Composable
 fun SwitchBlock(
@@ -430,7 +425,6 @@ fun TimeoutComposeLock(
 
         if(isPatternVisible) {
             LaunchedEffect(true) {
-//                Log.d("actionTimeout", "actionTimeout: $actionTimeout")
                 if(actionTimeout == null) {
                     delay(5000)
                     onDismiss()

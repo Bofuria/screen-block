@@ -1,23 +1,14 @@
 package com.catseye.screenblock.data
 
-import android.content.Context
 import android.util.Log
-import androidx.lifecycle.LifecycleOwner
-import com.catseye.screenblock.dataStore
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.zip
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -38,8 +29,7 @@ data class KeyData(
 )
 
 class KeyManager @Inject constructor(
-    private val dataStoreManager: DataStoreManager,
-    @ApplicationContext private val context: Context
+    private val dataStoreManager: DataStoreManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
